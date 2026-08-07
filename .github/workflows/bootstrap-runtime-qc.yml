@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   bootstrap-runtime-qc:
@@ -101,3 +101,13 @@ jobs:
             /tmp/mindway-validated-source.sha256
           if-no-files-found: error
           retention-days: 7
+
+      - name: Commit validated non-workflow source to main
+        run: |
+          set -euo pipefail
+          git restore --source=HEAD --staged --worktree .github/workflows || true
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: import validated Mindway MCP runtime source'
+          git push origin HEAD:main
