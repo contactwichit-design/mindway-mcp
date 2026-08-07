@@ -1,0 +1,74 @@
+name: Runtime QC
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-qc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Require authentic committed lockfile
+        run: |
+          set -euo pipefail
+          test -f package-lock.json
+          node -e "const l=require('./package-lock.json'); if(l.lockfileVersion!==3) process.exit(1)"
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Record runtime versions
+        run: |
+          node --version
+          npm --version
+          docker --version
+
+      - name: Reproducible install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: MCP integration tests with official client
+        run: npm run test:integration
+
+      - name: Source and secret audit
+        run: node scripts/audit-check.js
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Full dependency critical audit
+        run: npm audit --audit-level=critical
+
+      - name: Docker build
+        run: docker build -t mindway-mcp:qc .
+
+      - name: Container + official MCP client smoke test
+        run: |
+          set -euo pipefail
+          docker run -d --rm -p 8080:8080 --name mindway-qc mindway-mcp:qc
+          trap 'docker logs mindway-qc || true; docker stop mindway-qc || true' EXIT
+          ready=0
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          MINDWAY_MCP_URL=http://127.0.0.1:8080 npm run verify:container
