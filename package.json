@@ -1,0 +1,36 @@
+{
+  "name": "mindway-mcp",
+  "version": "1.0.0",
+  "description": "Mindway MCP - Canonical Context Gateway for Mindway Operating Protocol",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts",
+    "test": "vitest run",
+    "test:integration": "vitest run tests/integration/mcp-flow.test.ts",
+    "lint": "tsc --noEmit",
+    "verify:local": "npm run build && node scripts/verify-local.mjs",
+    "verify:container": "node scripts/verify-container.mjs",
+    "verify:remote": "node scripts/verify-remote.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.17.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

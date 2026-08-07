@@ -1,0 +1,42 @@
+steps:
+  # 1. Build the container image using Artifact Registry repository
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/mindway-mcp/server:${SHORT_SHA}'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/mindway-mcp/server:latest'
+      - '.'
+
+  # 2. Push container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/mindway-mcp/server:${SHORT_SHA}'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/mindway-mcp/server:latest'
+
+  # 3. Deploy to Cloud Run (Staging / Production Auth Controlled)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'mindway-mcp'
+      - '--image=asia-southeast1-docker.pkg.dev/$PROJECT_ID/mindway-mcp/server:${SHORT_SHA}'
+      - '--region=asia-southeast1'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated' # Default Production Security Recommendation
+      - '--port=8080'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--min-instances=0'
+      - '--max-instances=10'
+
+images:
+  - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/mindway-mcp/server:${SHORT_SHA}'
+  - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/mindway-mcp/server:latest'
