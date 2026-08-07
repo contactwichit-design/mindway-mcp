@@ -5,7 +5,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   bootstrap-runtime-qc:
@@ -85,11 +85,19 @@ jobs:
           test "$ready" = "1"
           MINDWAY_MCP_URL=http://127.0.0.1:8080 npm run verify:container
 
-      - name: Commit validated source and authentic lockfile
+      - name: Package validated source and authentic lockfile
         run: |
           set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
-          git commit -m 'feat: import validated Mindway MCP runtime source'
-          git push origin HEAD:main
+          zip -qr /tmp/mindway-validated-source.zip . \
+            -x '.git/*' 'node_modules/*' 'dist/*' '.github/workflows/bootstrap-runtime-qc.yml'
+          sha256sum /tmp/mindway-validated-source.zip | tee /tmp/mindway-validated-source.sha256
+
+      - name: Upload validated runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mindway-validated-source
+          path: |
+            /tmp/mindway-validated-source.zip
+            /tmp/mindway-validated-source.sha256
+          if-no-files-found: error
+          retention-days: 7
