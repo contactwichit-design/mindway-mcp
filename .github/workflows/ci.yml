@@ -54,8 +54,8 @@ jobs:
       - name: Production dependency audit
         run: npm audit --omit=dev --audit-level=high
 
-      - name: Full dependency critical audit
-        run: npm audit --audit-level=critical
+      - name: Full dependency moderate audit
+        run: npm audit --audit-level=moderate
 
       - name: Docker build
         run: docker build -t mindway-mcp:qc .
