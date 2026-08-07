@@ -21,7 +21,7 @@ jobs:
           curl -L --fail --retry 3 \
             'https://drive.usercontent.google.com/download?id=1-AFDXC6j0aa96MMgcOuUa6NDT8CQeFC5&export=download&confirm=t' \
             -o /tmp/mindway-source.zip
-          echo '2461eec5c4bac7e6fa34ee2379171644da472fd35298f531be763b416d1a9989  /tmp/mindway-source.zip' | sha256sum -c -
+          echo 'df1d7a2b69972502e26f9114a86541acf96d58c9cb9fcb42b0f2787ec1ceeaa0  /tmp/mindway-source.zip' | sha256sum -c -
           unzip -q /tmp/mindway-source.zip -d /tmp/mindway-import
           test -f /tmp/mindway-import/mindway-mcp/package.json
 
