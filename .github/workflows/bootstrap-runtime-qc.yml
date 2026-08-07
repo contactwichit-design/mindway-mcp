@@ -1,0 +1,97 @@
+name: Bootstrap Runtime QC
+
+on:
+  push:
+    branches: [bootstrap/runtime-qc-final]
+
+permissions:
+  contents: write
+
+jobs:
+  bootstrap-runtime-qc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout bootstrap branch
+        uses: actions/checkout@v4
+
+      - name: Download corrected source package
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 \
+            'https://drive.usercontent.google.com/download?id=1-AFDXC6j0aa96MMgcOuUa6NDT8CQeFC5&export=download&confirm=t' \
+            -o /tmp/mindway-source.zip
+          echo 'ee2b9098bf835a3015ce54c71676803ec67ac650161c2629eab11fc62f68cbcb  /tmp/mindway-source.zip' | sha256sum -c -
+          unzip -q /tmp/mindway-source.zip -d /tmp/mindway-import
+          test -f /tmp/mindway-import/mindway-mcp/package.json
+
+      - name: Import source atomically into worktree
+        run: |
+          set -euo pipefail
+          rsync -a --delete \
+            --exclude='.git/' \
+            /tmp/mindway-import/mindway-mcp/ ./
+          rm -f package-lock.json
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Record runtime versions
+        run: |
+          node --version
+          npm --version
+          docker --version
+
+      - name: Generate authentic npm lockfile
+        run: |
+          set -euo pipefail
+          rm -rf node_modules package-lock.json
+          npm install --package-lock-only --ignore-scripts
+          test -f package-lock.json
+          node -e "const l=require('./package-lock.json'); if(l.lockfileVersion!==3) process.exit(1)"
+
+      - name: Reproducible install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: MCP integration tests
+        run: npm run test:integration
+
+      - name: Source and secret audit
+        run: node scripts/audit-check.js
+
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Docker build
+        run: docker build -t mindway-mcp:qc .
+
+      - name: Container and official MCP client smoke test
+        run: |
+          set -euo pipefail
+          docker run -d --rm -p 8080:8080 --name mindway-qc mindway-mcp:qc
+          trap 'docker logs mindway-qc || true; docker stop mindway-qc || true' EXIT
+          ready=0
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then ready=1; break; fi
+            sleep 1
+          done
+          test "$ready" = "1"
+          MINDWAY_MCP_URL=http://127.0.0.1:8080 npm run verify:container
+
+      - name: Commit validated source and authentic lockfile to main
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'feat: import validated Mindway MCP runtime source'
+          git push origin HEAD:main
