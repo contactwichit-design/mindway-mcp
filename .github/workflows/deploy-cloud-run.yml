@@ -1,0 +1,118 @@
+name: Deploy Production to Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      project_id:
+        description: 'Google Cloud project ID'
+        required: true
+        type: string
+      workload_identity_provider:
+        description: 'Full Workload Identity Provider resource name'
+        required: true
+        type: string
+      service_account:
+        description: 'Deployment service account email'
+        required: true
+        type: string
+      region:
+        description: 'Cloud Run region'
+        required: true
+        default: 'asia-southeast1'
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  production-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout exact repository source
+        uses: actions/checkout@v7
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Re-run release gates before deployment
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+          npm test
+          npm run test:integration
+          node scripts/audit-check.js
+          npm audit --omit=dev --audit-level=high
+          npm audit --audit-level=moderate
+          docker build -t mindway-mcp:release .
+
+      - name: Authenticate to Google Cloud with GitHub OIDC
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ inputs.workload_identity_provider }}
+          service_account: ${{ inputs.service_account }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Enable required Google Cloud APIs
+        run: |
+          gcloud services enable \
+            run.googleapis.com \
+            artifactregistry.googleapis.com \
+            cloudbuild.googleapis.com \
+            --project='${{ inputs.project_id }}'
+
+      - name: Ensure Artifact Registry exists
+        run: |
+          set -euo pipefail
+          gcloud artifacts repositories describe mindway-mcp \
+            --project='${{ inputs.project_id }}' \
+            --location='${{ inputs.region }}' >/dev/null 2>&1 || \
+          gcloud artifacts repositories create mindway-mcp \
+            --project='${{ inputs.project_id }}' \
+            --repository-format=docker \
+            --location='${{ inputs.region }}' \
+            --description='Mindway MCP production images'
+
+      - name: Configure Docker for Artifact Registry
+        run: gcloud auth configure-docker '${{ inputs.region }}-docker.pkg.dev' --quiet
+
+      - name: Build and push immutable production image
+        env:
+          IMAGE: ${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/mindway-mcp/server:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy authenticated Cloud Run service
+        env:
+          IMAGE: ${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/mindway-mcp/server:${{ github.sha }}
+        run: |
+          set -euo pipefail
+          gcloud run deploy mindway-mcp \
+            --project='${{ inputs.project_id }}' \
+            --image="$IMAGE" \
+            --region='${{ inputs.region }}' \
+            --platform=managed \
+            --no-allow-unauthenticated \
+            --port=8080 \
+            --memory=512Mi \
+            --cpu=1 \
+            --min-instances=0 \
+            --max-instances=10 \
+            --quiet
+
+      - name: Record deployed service URL
+        run: |
+          gcloud run services describe mindway-mcp \
+            --project='${{ inputs.project_id }}' \
+            --region='${{ inputs.region }}' \
+            --format='value(status.url)'
