@@ -1,33 +1,20 @@
 name: Deploy Production to Cloud Run
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      project_id:
-        description: 'Google Cloud project ID'
-        required: true
-        type: string
-      workload_identity_provider:
-        description: 'Full Workload Identity Provider resource name'
-        required: true
-        type: string
-      service_account:
-        description: 'Deployment service account email'
-        required: true
-        type: string
-      runtime_service_account:
-        description: 'Cloud Run runtime service account email'
-        required: true
-        type: string
-      region:
-        description: 'Cloud Run region'
-        required: true
-        default: 'asia-southeast1'
-        type: string
 
 permissions:
   contents: read
   id-token: write
+
+env:
+  PROJECT_ID: mindway-production
+  REGION: asia-southeast1
+  WORKLOAD_IDENTITY_PROVIDER: projects/275739942525/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  DEPLOY_SERVICE_ACCOUNT: mindway-github-deploy@mindway-production.iam.gserviceaccount.com
+  RUNTIME_SERVICE_ACCOUNT: mindway-runtime@mindway-production.iam.gserviceaccount.com
 
 jobs:
   production-deploy:
@@ -59,8 +46,8 @@ jobs:
       - name: Authenticate to Google Cloud with GitHub OIDC
         uses: google-github-actions/auth@v3
         with:
-          workload_identity_provider: ${{ inputs.workload_identity_provider }}
-          service_account: ${{ inputs.service_account }}
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
 
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v3
@@ -69,17 +56,17 @@ jobs:
         run: |
           set -euo pipefail
           gcloud artifacts repositories describe mindway-mcp \
-            --project='${{ inputs.project_id }}' \
-            --location='${{ inputs.region }}' >/dev/null
-          gcloud iam service-accounts describe '${{ inputs.runtime_service_account }}' \
-            --project='${{ inputs.project_id }}' >/dev/null
+            --project="$PROJECT_ID" \
+            --location="$REGION" >/dev/null
+          gcloud iam service-accounts describe "$RUNTIME_SERVICE_ACCOUNT" \
+            --project="$PROJECT_ID" >/dev/null
 
       - name: Configure Docker for Artifact Registry
-        run: gcloud auth configure-docker '${{ inputs.region }}-docker.pkg.dev' --quiet
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
       - name: Build and push immutable production image
         env:
-          IMAGE: ${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/mindway-mcp/server:${{ github.sha }}
+          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/mindway-mcp/server:${{ github.sha }}
         run: |
           set -euo pipefail
           docker build -t "$IMAGE" .
@@ -87,15 +74,15 @@ jobs:
 
       - name: Deploy authenticated Cloud Run service
         env:
-          IMAGE: ${{ inputs.region }}-docker.pkg.dev/${{ inputs.project_id }}/mindway-mcp/server:${{ github.sha }}
+          IMAGE: ${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/mindway-mcp/server:${{ github.sha }}
         run: |
           set -euo pipefail
           gcloud run deploy mindway-mcp \
-            --project='${{ inputs.project_id }}' \
+            --project="$PROJECT_ID" \
             --image="$IMAGE" \
-            --region='${{ inputs.region }}' \
+            --region="$REGION" \
             --platform=managed \
-            --service-account='${{ inputs.runtime_service_account }}' \
+            --service-account="$RUNTIME_SERVICE_ACCOUNT" \
             --no-allow-unauthenticated \
             --port=8080 \
             --memory=512Mi \
@@ -107,6 +94,6 @@ jobs:
       - name: Record deployed service URL
         run: |
           gcloud run services describe mindway-mcp \
-            --project='${{ inputs.project_id }}' \
-            --region='${{ inputs.region }}' \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
             --format='value(status.url)'
