@@ -15,6 +15,10 @@ on:
         description: 'Deployment service account email'
         required: true
         type: string
+      runtime_service_account:
+        description: 'Cloud Run runtime service account email'
+        required: true
+        type: string
       region:
         description: 'Cloud Run region'
         required: true
@@ -61,25 +65,14 @@ jobs:
       - name: Setup gcloud
         uses: google-github-actions/setup-gcloud@v3
 
-      - name: Enable required Google Cloud APIs
-        run: |
-          gcloud services enable \
-            run.googleapis.com \
-            artifactregistry.googleapis.com \
-            cloudbuild.googleapis.com \
-            --project='${{ inputs.project_id }}'
-
-      - name: Ensure Artifact Registry exists
+      - name: Verify pre-provisioned GCP infrastructure
         run: |
           set -euo pipefail
           gcloud artifacts repositories describe mindway-mcp \
             --project='${{ inputs.project_id }}' \
-            --location='${{ inputs.region }}' >/dev/null 2>&1 || \
-          gcloud artifacts repositories create mindway-mcp \
-            --project='${{ inputs.project_id }}' \
-            --repository-format=docker \
-            --location='${{ inputs.region }}' \
-            --description='Mindway MCP production images'
+            --location='${{ inputs.region }}' >/dev/null
+          gcloud iam service-accounts describe '${{ inputs.runtime_service_account }}' \
+            --project='${{ inputs.project_id }}' >/dev/null
 
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker '${{ inputs.region }}-docker.pkg.dev' --quiet
@@ -102,6 +95,7 @@ jobs:
             --image="$IMAGE" \
             --region='${{ inputs.region }}' \
             --platform=managed \
+            --service-account='${{ inputs.runtime_service_account }}' \
             --no-allow-unauthenticated \
             --port=8080 \
             --memory=512Mi \
