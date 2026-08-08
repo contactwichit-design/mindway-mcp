@@ -1,0 +1,70 @@
+name: Remote Production QC
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: mindway-production
+  REGION: asia-southeast1
+  WORKLOAD_IDENTITY_PROVIDER: projects/275739942525/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+  DEPLOY_SERVICE_ACCOUNT: mindway-github-deploy@mindway-production.iam.gserviceaccount.com
+
+jobs:
+  remote-qc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install verifier dependencies
+        run: npm ci
+
+      - name: Authenticate to Google Cloud with GitHub OIDC
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ env.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Verify deployed revision and obtain service URL
+        run: |
+          set -euo pipefail
+          URL="$(gcloud run services describe mindway-mcp --project="$PROJECT_ID" --region="$REGION" --format='value(status.url)')"
+          REVISION="$(gcloud run services describe mindway-mcp --project="$PROJECT_ID" --region="$REGION" --format='value(status.latestReadyRevisionName)')"
+          test -n "$URL"
+          test -n "$REVISION"
+          echo "Service URL: $URL"
+          echo "Ready revision: $REVISION"
+
+      - name: Start authenticated Cloud Run proxy
+        run: |
+          set -euo pipefail
+          nohup gcloud run services proxy mindway-mcp \
+            --project="$PROJECT_ID" \
+            --region="$REGION" \
+            --port=9090 > /tmp/mindway-proxy.log 2>&1 &
+          for i in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:9090/health >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/mindway-proxy.log
+          exit 1
+
+      - name: Full remote MCP verification through authenticated proxy
+        run: npm run verify:remote -- http://127.0.0.1:9090/mcp
